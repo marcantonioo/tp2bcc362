@@ -1,3 +1,6 @@
+#ifndef RAFT_H
+#define RAFT_H
+
 #include <vector>
 #include <chrono>
 #include "Role.h"
@@ -8,13 +11,14 @@
 #include <unordered_map>
 #include "Network.h"
 
-class raft{
-    
+class raft
+{
+
 private:
     NodeInfo node;
     int currentTerm;
     int votedFor;
-    int currentLeader;
+    NodeInfo currentLeader;
     int commitLength;
     std::unordered_map<int, int> sentLength;
     std::unordered_map<int, int> ackedLength;
@@ -29,7 +33,7 @@ private:
     Role role;
 
 public:
-    raft (int id, int port, std::string addr);
+    raft(int id, int port, std::string addr);
     void recoverFromCrash();
     void leaderCrashed();
 
@@ -37,13 +41,15 @@ public:
     void collectVotes(int VoterID, int Term, bool granted);
     void broadcastElectionMessages(RequestVoteMessage msg, NodeInfo node);
     void receiveElectionMessage(RequestVoteMessage msg);
-    
+
     void replicateLog(int prefixLength, Log sufix);
-    
-    void receiveMessage(Message msg, int term, int LeaderID, int prefixLength, int prefixTerm,  int leaderCommit, std::vector<Log> sufix);
+
+    void receiveMessage(Message msg, int term, int LeaderID, int prefixLength, int prefixTerm, int leaderCommit, std::vector<Log> sufix);
     void broadcastClientMessage(ClientCommand msg);
 
     void AppendEntries(int prefixLength, int leaderCommit, std::vector<Log> sufix);
     void logAcknowledgment(Message LogResponse, int followerID, int term, bool success);
     void commitLog(int commitLength);
 };
+
+#endif

@@ -12,7 +12,7 @@ public:
     int getcLogTerm(){return cLogTerm;}
     int getcID(){return cID;}
     RequestVoteMessage(int nodeID, int currentTerm, int logLength, int lastTerm){
-        this->cID = nodeID;
+        this->cID = nodeID; 
         this->cTerm = currentTerm;
         this->cLogLength = logLength;
         this->cTerm = lastTerm;
