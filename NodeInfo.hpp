@@ -10,4 +10,11 @@ public:
         this->id = id;
         this-> port = port;
     }
+    void setid(int ID){id = ID;}
+    void setport(int Port){port = Port;}
+    void setaddress(std::string addr){address = addr;}
+    int getid(){return id;}
+    int getport(){return port;}
+    std::string getaddress(){return address;}
+
 };
