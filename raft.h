@@ -43,8 +43,8 @@ public:
     void receiveElectionMessage(RequestVoteMessage msg);
 
     void replicateLog(NodeInfo follower);
-
-    void receiveMessage(Message msg, int term, int LeaderID, int prefixLength, int prefixTerm, int leaderCommit, std::vector<Log> sufix);
+    void followerReceiveAppendEntries(NodeInfo Leader, int term, int prefixLen, int prefixTerm, int leaderCommit, std::vector<LogEntry> suffix);
+    
     void broadcastClientMessage(ClientCommand msg);
 
     void AppendEntries(int prefixLength, int leaderCommit, std::vector<Log> sufix);

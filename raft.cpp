@@ -31,10 +31,10 @@ void raft::leaderCrashed()
         int lastTerm = 0;
         if (log.getEntries().size())
             lastTerm = log.getEntries()[log.getEntries().size() - 1].getTerm();
-        RequestVoteMessage propinaDeVoto(node.getid(), currentTerm, log.getEntries().size(), lastTerm);
+        RequestVoteMessage Voterequest(node.getid(), currentTerm, log.getEntries().size(), lastTerm);
         for (auto node : cluster)
         {
-            broadcastElectionMessages(propinaDeVoto, node);
+            network.sendRequestVote(node, Voterequest);
         }
         // colocar um random de timeout aqui
     }
@@ -110,5 +110,28 @@ void raft::replicateLog(NodeInfo follower){
     Log suffix(entries);
     int prefixTerm = 0;
     if (prefixLength > 0) prefixTerm = log.getEntries()[prefixLength-1].getTerm();
-    network.sendAppendEntries(follower, currentTerm, prefixLength, prefixTerm, commitLength, suffix.getEntries());
+    network.sendAppendEntries(follower, node.getid(), currentTerm, prefixLength, prefixTerm, commitLength, suffix.getEntries());
+}
+
+void raft::followerReceiveAppendEntries(NodeInfo leader, int term, int prefixLen, int prefixTerm, int leaderCommit, std::vector<LogEntry> suffix){
+    if (term > currentTerm) {
+        currentTerm = term;
+        votedFor = -1;
+        //cancelar timeout
+    }
+    if (term == currentTerm){
+        role = Role::FOLLOWER;
+        currentLeader = leader;
+    }
+    bool logOK = (log.getEntries().size() >= prefixLen) && (prefixLen == 0 || log.getEntries()[prefixLen-1].getTerm() == prefixTerm);
+    if (term == currentTerm && logOK){
+        for (auto it : suffix){
+            log.append(it);
+        }
+        int ack = prefixLen+suffix.size();
+        //send LogResponse ,nodeID, CurrentTerm, ack, true
+    }
+    else
+        //send LogResponse ,nodeID, CurrentTerm, 0, false
+        return;
 }
