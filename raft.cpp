@@ -183,7 +183,7 @@ void raft::commitLog(){
         int acks = 0;
         for (auto it : cluster){
             if (ackedLength[node.getid()] > commitLength)
-                ack++;
+                acks++;
         }
         if (acks >=(cluster.size()+1)/2){
             //deliver log to app
