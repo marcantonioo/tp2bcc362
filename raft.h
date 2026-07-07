@@ -44,6 +44,7 @@ public:
 
     void replicateLog(NodeInfo follower);
     void followerReceiveAppendEntries(NodeInfo Leader, int term, int prefixLen, int prefixTerm, int leaderCommit, std::vector<LogEntry> suffix);
+    void followerAppend(int prefixLen, int leaderCommit, std::vector<LogEntry> suffix);
     
     void broadcastClientMessage(ClientCommand msg);
 

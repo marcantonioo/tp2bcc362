@@ -15,5 +15,9 @@ public:
     }
     std::vector<LogEntry> getEntries() { return logentries; }
     void append(LogEntry log) { logentries.push_back(log); }
+    void truncate(size_t index){
+        if (index < logentries.size())
+            logentries.erase(logentries.begin() + index, logentries.end());
+    }
 };
 #endif

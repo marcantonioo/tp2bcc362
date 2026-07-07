@@ -125,13 +125,30 @@ void raft::followerReceiveAppendEntries(NodeInfo leader, int term, int prefixLen
     }
     bool logOK = (log.getEntries().size() >= prefixLen) && (prefixLen == 0 || log.getEntries()[prefixLen-1].getTerm() == prefixTerm);
     if (term == currentTerm && logOK){
-        for (auto it : suffix){
-            log.append(it);
-        }
+        followerAppend(prefixLen, leaderCommit, suffix);
         int ack = prefixLen+suffix.size();
         //send LogResponse ,nodeID, CurrentTerm, ack, true
     }
     else
         //send LogResponse ,nodeID, CurrentTerm, 0, false
         return;
+}
+
+void raft::followerAppend(int prefixLen, int leaderCommit, std::vector<LogEntry> suffix){
+    if (suffix.size() > 0 && log.getEntries().size() > prefixLen){
+        int index = log.getEntries().size() > prefixLen + suffix.size()
+        ?prefixLen + suffix.size()-1
+        :log.getEntries().size()-1;
+        if (log.getEntries()[index].getTerm()!=suffix[index-prefixLen].getTerm())
+            log.truncate(prefixLen);
+    }
+    if(prefixLen+suffix.size() > log.getEntries().size())
+        for(int i = log.getEntries().size()-prefixLen; i < suffix.size(); i++)
+            log.append(suffix[i]);
+    
+    if (leaderCommit > commitLength){
+        for (int i = commitLength; i < leaderCommit-1; i++)
+            //deliver commit to the aplication
+    }
+    commitLength = leaderCommit;
 }
