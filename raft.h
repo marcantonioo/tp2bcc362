@@ -4,34 +4,45 @@
 #include "Log.h"
 #include "NodeInfo.hpp"
 #include "RequestVoteMessage.hpp"
+#include <unordered_set>
+#include <unordered_map>
+#include "Network.h"
 
 class raft{
+    
 private:
-    int id;
+    NodeInfo node;
     int currentTerm;
     int votedFor;
     int currentLeader;
     int commitLength;
-    std::vector<int> sentLength;
-    std::vector<int> ackedLength;
-    std::vector<int> votesReceived;
+    std::unordered_map<int, int> sentLength;
+    std::unordered_map<int, int> ackedLength;
+    std::unordered_set<int> votesReceived;
     std::chrono::steady_clock::time_point lastHeartBeat;
     std::chrono::milliseconds timeout;
 
-    std::vector<Log> log;
+    Log log;
     std::vector<NodeInfo> cluster;
+    Network network;
 
     Role role;
 
 public:
-    raft (int id);
+    raft (int id, int port, std::string addr);
     void recoverFromCrash();
     void leaderCrashed();
+
     void newElection();
-    void collectVotes(int VoteResponse, int VoterID, int Term, bool granted);
+    void collectVotes(int VoterID, int Term, bool granted);
     void broadcastElectionMessages(RequestVoteMessage msg, NodeInfo node);
-    void replicateLog(int prefixLength, int prefixTerm, std::vector<Log> sufix);
+    void receiveElectionMessage(RequestVoteMessage msg);
+    
+    void replicateLog(int prefixLength, Log sufix);
+    
     void receiveMessage(Message msg, int term, int LeaderID, int prefixLength, int prefixTerm,  int leaderCommit, std::vector<Log> sufix);
+    void broadcastClientMessage(ClientCommand msg);
+
     void AppendEntries(int prefixLength, int leaderCommit, std::vector<Log> sufix);
     void logAcknowledgment(Message LogResponse, int followerID, int term, bool success);
     void commitLog(int commitLength);
