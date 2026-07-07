@@ -1,8 +1,9 @@
-#include "Message.h"
-
+#include "LogEntry.h"
+#include <vector>
 class Log{
     int term;
-    Message message;
+    std::vector<LogEntry> logentry;
 public:
-    Log(int term, Message message);
+    Log(int term, LogEntry message);
+    int getTerm(){return term;}
 }; 
