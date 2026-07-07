@@ -71,20 +71,18 @@ void raft::collectVotes(int VoterID, int Term, bool granted)
     {
         role = Role::LEADER;
         // dar um jeito de cancelar o election timer nessa linha em especifico
-        for (auto node : cluster)
+        for (auto follower : cluster)
         {
-            sentLength[node.getid()] = log.getEntries().size();
-            ackedLength[node.getid()] = 0;
-            std::vector<LogEntry> entries(log.getEntries().begin() + sentLength[node.getid()], log.getEntries().end());
-            Log suffix(entries);
-            replicateLog(sentLength[node.getid()], suffix);
+            sentLength[follower.getid()] = log.getEntries().size();
+            ackedLength[follower.getid()] = 0;
+            replicateLog(follower);
         }
     }
     else if (Term > currentTerm)
     {
         currentTerm = Term;
         role = Role::FOLLOWER;
-        votedFor = {};
+        votedFor = -1;
         // dar um jeito de cancelar o election timer nessa linha em especifico
     }
 }
@@ -95,15 +93,22 @@ void raft::broadcastClientMessage(ClientCommand msg)
     {
         log.append(LogEntry(msg, currentTerm));
         ackedLength[node.getid()] = log.getEntries().size();
-        for (auto node : cluster)
+        for (auto follower : cluster)
         {
-            std::vector<LogEntry> entries(log.getEntries().begin() + sentLength[node.getid()], log.getEntries().end());
-            Log suffix(entries);
-            replicateLog(sentLength[node.getid()], suffix);
+            replicateLog(follower);
         }
     }
     else
     {
         network.sendClientCommand(currentLeader, msg);
     }
+}
+
+void raft::replicateLog(NodeInfo follower){
+    int prefixLength = sentLength[follower.getid()];
+    std::vector<LogEntry> entries(log.getEntries().begin() + sentLength[follower.getid()], log.getEntries().end());
+    Log suffix(entries);
+    int prefixTerm = 0;
+    if (prefixLength > 0) prefixTerm = log.getEntries()[prefixLength-1].getTerm();
+    network.sendAppendEntries(follower, currentTerm, prefixLength, prefixTerm, commitLength, suffix.getEntries());
 }

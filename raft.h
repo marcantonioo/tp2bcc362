@@ -42,7 +42,7 @@ public:
     void broadcastElectionMessages(RequestVoteMessage msg, NodeInfo node);
     void receiveElectionMessage(RequestVoteMessage msg);
 
-    void replicateLog(int prefixLength, Log sufix);
+    void replicateLog(NodeInfo follower);
 
     void receiveMessage(Message msg, int term, int LeaderID, int prefixLength, int prefixTerm, int leaderCommit, std::vector<Log> sufix);
     void broadcastClientMessage(ClientCommand msg);
