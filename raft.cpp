@@ -149,6 +149,46 @@ void raft::followerAppend(int prefixLen, int leaderCommit, std::vector<LogEntry>
     if (leaderCommit > commitLength){
         for (int i = commitLength; i < leaderCommit-1; i++)
             //deliver commit to the aplication
+            int a =2;
     }
     commitLength = leaderCommit;
+    network.sendAppendAck(node, currentLeader.getid(), currentTerm, log.getEntries().size(), true);
+}
+
+void raft::logAcknowledgment(int followerID, int term, int ack, bool success){
+    if (term == currentTerm && role == Role::LEADER){
+        if(success && ack >=ackedLength[followerID]){
+            sentLength[followerID] = ack;
+            ackedLength[followerID] = ack;
+            //CommitLogEntries()
+        }
+        else if (sentLength[followerID] > 0){
+            NodeInfo followerNode(-1, -1, "");
+            for (auto it : cluster)
+                if(it.getid() == followerID) followerNode = it;
+            sentLength[followerID] -= 1;
+            replicateLog(followerNode);
+        }
+    }
+    else if (term > currentTerm){
+        currentTerm = term;
+        role = Role::FOLLOWER;
+        votedFor = -1;
+        //cancel election timer
+    }
+}
+
+void raft::commitLog(){
+    while (commitLength < log.getEntries().size()){
+        int acks = 0;
+        for (auto it : cluster){
+            if (ackedLength[node.getid()] > commitLength)
+                ack++;
+        }
+        if (acks >=(cluster.size()+1)/2){
+            //deliver log to app
+            commitLength++;
+        }
+        else break;
+    }
 }

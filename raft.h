@@ -49,8 +49,8 @@ public:
     void broadcastClientMessage(ClientCommand msg);
 
     void AppendEntries(int prefixLength, int leaderCommit, std::vector<Log> sufix);
-    void logAcknowledgment(Message LogResponse, int followerID, int term, bool success);
-    void commitLog(int commitLength);
+    void logAcknowledgment(int followerID, int term, int ack, bool success);
+    void commitLog();
 };
 
 #endif
