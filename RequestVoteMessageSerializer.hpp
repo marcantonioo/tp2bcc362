@@ -6,8 +6,8 @@
 
 class RequestVoteMessageSerializer{
 public:
-    static std::vector<char> serialize(RequestVoteMessage& msg);
-    static RequestVoteMessage deserialize(const std::vector<char>& buffer);
+    static std::vector<char> serialize(RequestVoteMessage msg);
+    static RequestVoteMessage deserialize(const std::vector<char> buffer);
 };
 
 #endif

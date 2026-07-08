@@ -4,11 +4,78 @@
 #include <memory>
 #include "LogEntrySerializer.hpp"
 #include <sys/socket.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <iostream>
+#include "ClientCommandSerializer.h"
 
 
-void startListening(int port){
-    while(1){
-        
+void Network::startListening(int port)
+{
+    int listenfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (listenfd < 0)
+    {
+        perror("socket");
+        return;
+    }
+
+    int opt = 1;
+    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    sockaddr_in serverAddr{};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(port);
+
+    if (bind(listenfd,
+             (sockaddr*)&serverAddr,
+             sizeof(serverAddr)) < 0)
+    {
+        perror("bind");
+        close(listenfd);
+        return;
+    }
+
+    if (listen(listenfd, 5) < 0)
+    {
+        perror("listen");
+        close(listenfd);
+        return;
+    }
+
+    std::cout << "Escutando na porta " << port << std::endl;
+
+    while (true)
+    {
+        sockaddr_in clientAddr{};
+        socklen_t clientLen = sizeof(clientAddr);
+
+        sockfd = accept(
+            listenfd,
+            (sockaddr*)&clientAddr,
+            &clientLen
+        );
+
+        if (sockfd < 0)
+        {
+            perror("accept");
+            continue;
+        }
+
+        std::cout << "Cliente conectado." << std::endl;
+
+        auto msg = receiveMessage();
+
+        if (msg)
+        {
+            std::cout << "Mensagem recebida. Tipo = "
+                      << static_cast<int>(msg->msgtype)
+                      << std::endl;
+        }
+
+        close(sockfd);
     }
 }
 std::unique_ptr<messageBase> Network::receiveMessage()
@@ -123,8 +190,28 @@ std::unique_ptr<messageBase> Network::receiveMessage()
 
         case messageType::SEND_CLIENT_COMMAND:
         {
-            // Necessita de ClientCommandSerializer.
-            break;
+                int nodeSize;
+                recv(sockfd, &nodeSize, sizeof(nodeSize), 0);
+
+                std::vector<char> nodeBuffer(nodeSize);
+                recv(sockfd, nodeBuffer.data(), nodeSize, 0);
+
+                NodeInfo target =
+                    NodeInfoSerializer::deserialize(nodeBuffer);
+
+                int commandSize;
+                recv(sockfd, &commandSize, sizeof(commandSize), 0);
+
+                std::vector<char> commandBuffer(commandSize);
+                recv(sockfd, commandBuffer.data(), commandSize, 0);
+
+                ClientCommand command =
+                    ClientCommandSerializer::deserialize(commandBuffer);
+
+                return std::make_unique<sendClientCommandStruct>(
+                    target,
+                    command
+                );
         }
 
         case messageType::SEND_REQUEST_VOTE:
@@ -153,4 +240,196 @@ std::unique_ptr<messageBase> Network::receiveMessage()
     }
 
     return nullptr;
+}
+
+int Network::createConnection(const std::string& ip, int port)
+{
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+
+    if(sock < 0)
+    {
+        perror("socket");
+        return -1;
+    }
+
+
+    sockaddr_in server{};
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(port);
+
+
+    inet_pton(
+        AF_INET,
+        ip.c_str(),
+        &server.sin_addr
+    );
+
+
+    if(connect(
+        sock,
+        (sockaddr*)&server,
+        sizeof(server)
+    ) < 0)
+    {
+        perror("connect");
+        close(sock);
+        return -1;
+    }
+
+
+    return sock;
+}
+
+void Network::sendRequestVote(sendRequestVoteStruct msg)
+{
+    int sock = createConnection(msg.target.getaddress(), msg.target.getport());
+    if(sock < 0)
+        return;
+
+    messageType type = messageType::SEND_REQUEST_VOTE;
+
+    send(sock, &type, sizeof(type), 0);
+
+    auto data = RequestVoteMessageSerializer::serialize(msg.msg);
+
+    int size = data.size();
+
+    send(sock, &size, sizeof(size), 0);
+    send(sock, data.data(), size, 0);
+
+    close(sock);
+}
+
+void Network::sendClientCommand(sendClientCommandStruct msg)
+{
+    int sock = createConnection(
+        msg.target.getaddress(),
+        msg.target.getport()
+    );
+
+    if (sock < 0)
+        return;
+
+    messageType type = messageType::SEND_CLIENT_COMMAND;
+    send(sock, &type, sizeof(type), 0);
+
+    auto nodeBuffer = NodeInfoSerializer::serialize(msg.target);
+
+    int nodeSize = nodeBuffer.size();
+    send(sock, &nodeSize, sizeof(nodeSize), 0);
+    send(sock, nodeBuffer.data(), nodeSize, 0);
+
+    auto commandBuffer = ClientCommandSerializer::serialize(msg.msg);
+
+    int commandSize = commandBuffer.size();
+    send(sock, &commandSize, sizeof(commandSize), 0);
+    send(sock, commandBuffer.data(), commandSize, 0);
+
+    close(sock);
+}
+
+void Network::sendVoteResponse(sendVoteResponseStruct msg)
+{
+    int sock = createConnection(
+        msg.target.getaddress(),
+        msg.target.getport()
+    );
+
+    if (sock < 0)
+        return;
+
+    messageType type = messageType::SEND_VOTE_RESPONSE;
+    send(sock, &type, sizeof(type), 0);
+
+    std::vector<char> nodeBuffer =
+        NodeInfoSerializer::serialize(msg.target);
+
+    int size = nodeBuffer.size();
+
+    send(sock, &size, sizeof(size), 0);
+    send(sock, nodeBuffer.data(), size, 0);
+
+    send(sock, &msg.voterID, sizeof(msg.voterID), 0);
+    send(sock, &msg.currentTerm, sizeof(msg.currentTerm), 0);
+    send(sock, &msg.granted, sizeof(msg.granted), 0);
+
+    close(sock);
+}
+
+void Network::sendAppendAck(sendAppendAckStruct msg)
+{
+    int sock = createConnection(
+        msg.target.getaddress(),
+        msg.target.getport()
+    );
+
+    if (sock < 0)
+        return;
+
+    messageType type = messageType::SEND_APPEND_ACK;
+    send(sock, &type, sizeof(type), 0);
+
+    std::vector<char> nodeBuffer =
+        NodeInfoSerializer::serialize(msg.target);
+
+    int size = nodeBuffer.size();
+
+    send(sock, &size, sizeof(size), 0);
+    send(sock, nodeBuffer.data(), size, 0);
+
+    send(sock, &msg.followerId, sizeof(msg.followerId), 0);
+    send(sock, &msg.currentTerm, sizeof(msg.currentTerm), 0);
+    send(sock, &msg.ack, sizeof(msg.ack), 0);
+    send(sock, &msg.granted, sizeof(msg.granted), 0);
+
+    close(sock);
+}
+
+void Network::sendAppendEntries(sendAppendEntriesStruct msg)
+{
+    int sock = createConnection(
+        msg.target.getaddress(),
+        msg.target.getport()
+    );
+
+    if (sock < 0)
+        return;
+
+    messageType type = messageType::SEND_APPEND_ENTRIES;
+    send(sock, &type, sizeof(type), 0);
+
+    // Envia o NodeInfo
+    std::vector<char> nodeBuffer =
+        NodeInfoSerializer::serialize(msg.target);
+
+    int size = nodeBuffer.size();
+
+    send(sock, &size, sizeof(size), 0);
+    send(sock, nodeBuffer.data(), size, 0);
+
+    // Envia os campos da mensagem
+    send(sock, &msg.leaderId, sizeof(msg.leaderId), 0);
+    send(sock, &msg.currentTerm, sizeof(msg.currentTerm), 0);
+    send(sock, &msg.prefixLen, sizeof(msg.prefixLen), 0);
+    send(sock, &msg.prefixTerm, sizeof(msg.prefixTerm), 0);
+    send(sock, &msg.commitLength, sizeof(msg.commitLength), 0);
+
+    // Envia a quantidade de entradas do log
+    int logCount = msg.suffix.size();
+    send(sock, &logCount, sizeof(logCount), 0);
+
+    // Envia cada LogEntry
+    for (auto& entry : msg.suffix)
+    {
+        std::vector<char> logBuffer =
+            LogEntrySerializer::serialize(entry);
+
+        size = logBuffer.size();
+
+        send(sock, &size, sizeof(size), 0);
+        send(sock, logBuffer.data(), size, 0);
+    }
+
+    close(sock);
 }

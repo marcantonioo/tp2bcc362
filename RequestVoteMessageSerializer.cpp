@@ -3,7 +3,7 @@
 #include "RequestVoteMessageSerializer.hpp"
 #include <cstring>
 
-std::vector<char> RequestVoteMessageSerializer::serialize(RequestVoteMessage& msg)
+std::vector<char> RequestVoteMessageSerializer::serialize(RequestVoteMessage msg)
 {
     std::vector<char> buffer;
 
@@ -20,7 +20,7 @@ std::vector<char> RequestVoteMessageSerializer::serialize(RequestVoteMessage& ms
     return buffer;
 }
 
-RequestVoteMessage RequestVoteMessageSerializer::deserialize(const std::vector<char>& buffer)
+RequestVoteMessage RequestVoteMessageSerializer::deserialize(const std::vector<char> buffer)
 {
     const char* ptr = buffer.data();
 

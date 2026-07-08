@@ -13,6 +13,7 @@ public:
         this->id = id;
         this-> port = port;
     }
+    NodeInfo(): address(""), id(-1), port(-1){}
     void setid(int ID){id = ID;}
     void setport(int Port){port = Port;}
     void setaddress(std::string addr){address = addr;}

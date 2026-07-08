@@ -36,10 +36,10 @@ struct sendVoteResponseStruct: messageBase{
     sendVoteResponseStruct(NodeInfo& target, int VoterID, int CurrentTerm, bool granted):messageBase(messageType::SEND_VOTE_RESPONSE), target(target), voterID(VoterID), currentTerm(CurrentTerm), granted(granted){}
 };
 struct sendClientCommandStruct : messageBase{
-    const NodeInfo& target;
-    const ClientCommand& msg;
+    NodeInfo target;
+    ClientCommand& msg;
 
-    sendClientCommandStruct(const NodeInfo& target, const ClientCommand& msg)
+    sendClientCommandStruct(NodeInfo target, ClientCommand msg)
         : messageBase(messageType::SEND_CLIENT_COMMAND),
           target(target),
           msg(msg)
@@ -47,7 +47,7 @@ struct sendClientCommandStruct : messageBase{
 };
 
 struct sendAppendEntriesStruct : messageBase{
-    const NodeInfo& target;
+    NodeInfo target;
     int leaderId;
     int currentTerm;
     int prefixLen;
@@ -96,6 +96,7 @@ struct sendAppendAckStruct : messageBase{
 
 class Network{
     int sockfd;
+    int createConnection(const std::string& ip, int port);
 public:
     void sendRequestVote(sendRequestVoteStruct msg);
     void sendVoteResponse(sendVoteResponseStruct msg);
