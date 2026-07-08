@@ -3,6 +3,7 @@
 #include "RequestVoteMessage.hpp"
 #include "NodeInfo.hpp"
 #include <memory>
+#include <functional>
 
 
 
@@ -20,10 +21,13 @@ struct messageBase{
 };
 
 
-struct sendRequestVoteStruct : messageBase{
-    NodeInfo& target;
+struct sendRequestVoteStruct : messageBase {
+    NodeInfo target;     // Destino (quem vai receber)
+    NodeInfo candidate;  // Quem está pedindo o voto (nós mesmos)
     RequestVoteMessage msg;
-    sendRequestVoteStruct(NodeInfo& target, RequestVoteMessage msg):messageBase(messageType::SEND_REQUEST_VOTE), target(target), msg(msg){}
+
+    sendRequestVoteStruct(NodeInfo target, NodeInfo candidate, RequestVoteMessage msg)
+        : messageBase(messageType::SEND_REQUEST_VOTE), target(target), candidate(candidate), msg(msg) {}
 };
 
 
@@ -105,7 +109,7 @@ public:
     void sendAppendAck(sendAppendAckStruct msg);
     
     std::unique_ptr<messageBase> receiveMessage();
-    void startListening(int port);
+    void startListening(int port, std::function<void(std::unique_ptr<messageBase>)> messageHandler);
 };
 
 #endif

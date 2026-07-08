@@ -9,9 +9,10 @@
 #include <unistd.h>
 #include <iostream>
 #include "ClientCommandSerializer.h"
+#include <functional>
 
 
-void Network::startListening(int port)
+void Network::startListening(int port, std::function<void(std::unique_ptr<messageBase>)> messageHandler)
 {
     int listenfd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -52,27 +53,17 @@ void Network::startListening(int port)
         sockaddr_in clientAddr{};
         socklen_t clientLen = sizeof(clientAddr);
 
-        sockfd = accept(
-            listenfd,
-            (sockaddr*)&clientAddr,
-            &clientLen
-        );
-
-        if (sockfd < 0)
-        {
+        sockfd = accept(listenfd, (sockaddr*)&clientAddr, &clientLen);
+        if (sockfd < 0) {
             perror("accept");
             continue;
         }
 
-        std::cout << "Cliente conectado." << std::endl;
-
         auto msg = receiveMessage();
-
         if (msg)
         {
-            std::cout << "Mensagem recebida. Tipo = "
-                      << static_cast<int>(msg->msgtype)
-                      << std::endl;
+            // Em vez de só printar, despacha a mensagem para o Handler (Raft)!
+            messageHandler(std::move(msg));
         }
 
         close(sockfd);
@@ -221,21 +212,15 @@ std::unique_ptr<messageBase> Network::receiveMessage()
 
             std::vector<char> nodeBuffer(size);
             recv(sockfd, nodeBuffer.data(), size, 0);
-
-            NodeInfo target = NodeInfoSerializer::deserialize(nodeBuffer);
+            NodeInfo candidate = NodeInfoSerializer::deserialize(nodeBuffer); // O info de quem pediu o voto!
 
             recv(sockfd, &size, sizeof(size), 0);
-
             std::vector<char> msgBuffer(size);
             recv(sockfd, msgBuffer.data(), size, 0);
+            RequestVoteMessage msg = RequestVoteMessageSerializer::deserialize(msgBuffer);
 
-            RequestVoteMessage msg =
-                RequestVoteMessageSerializer::deserialize(msgBuffer);
-
-            return std::make_unique<sendRequestVoteStruct>(
-                target,
-                msg
-            );
+            // Repassamos um NodeInfo vazio como target (irrelevante agora), e o candidate real
+            return std::make_unique<sendRequestVoteStruct>(NodeInfo(), candidate, msg);
         }
     }
 
@@ -284,17 +269,20 @@ int Network::createConnection(const std::string& ip, int port)
 void Network::sendRequestVote(sendRequestVoteStruct msg)
 {
     int sock = createConnection(msg.target.getaddress(), msg.target.getport());
-    if(sock < 0)
-        return;
+    if(sock < 0) return;
 
     messageType type = messageType::SEND_REQUEST_VOTE;
-
     send(sock, &type, sizeof(type), 0);
 
+    // CORREÇÃO: Enviar o NodeInfo do candidato primeiro (O recv() do outro lado exige isso!)
+    auto nodeBuffer = NodeInfoSerializer::serialize(msg.candidate);
+    int nodeSize = nodeBuffer.size();
+    send(sock, &nodeSize, sizeof(nodeSize), 0);
+    send(sock, nodeBuffer.data(), nodeSize, 0);
+
+    // Depois envia a mensagem real de RequestVote
     auto data = RequestVoteMessageSerializer::serialize(msg.msg);
-
     int size = data.size();
-
     send(sock, &size, sizeof(size), 0);
     send(sock, data.data(), size, 0);
 

@@ -1,6 +1,10 @@
 #include "raft.h"
+#include <iostream>
+// raft.cpp
 
-raft::raft(int id, int port, std::string addr) : node(id, port, addr), currentLeader(-1, -1, "")
+// O seu construtor deve estar assim:
+raft::raft(int id, int port, std::string addr) 
+    : node(id, port, addr), currentLeader(-1, -1, ""), running(false)
 {
     currentTerm = 0;
     votedFor = -1;
@@ -9,6 +13,14 @@ raft::raft(int id, int port, std::string addr) : node(id, port, addr), currentLe
     ackedLength = {};
     votesReceived = {};
     role = Role::FOLLOWER;
+    
+    lastHeartBeat = std::chrono::steady_clock::now();
+    resetElectionTimeout();
+}
+
+// 👉 O DESTRUTOR QUE ESTÁ FALTANDO:
+raft::~raft() {
+    stop();
 }
 
 void raft::recoverFromCrash()
@@ -20,70 +32,89 @@ void raft::recoverFromCrash()
 }
 void raft::leaderCrashed()
 {
-    if (std::chrono::steady_clock::now() - lastHeartBeat > timeout)
+    // 1. Incrementa o Termo e muda para Candidato
+    currentTerm += 1; 
+    role = Role::CANDIDATE;
+    
+    // 2. Vota em si mesmo
+    votedFor = node.getid();
+    votesReceived.clear();
+    votesReceived.insert(node.getid());
+    
+    // 3. Reseta o timer para não tentar uma nova eleição imediatamente
+    resetElectionTimeout(); 
+
+    // Agora cria a mensagem com o NOVO Termo
+    int lastTerm = 0;
+    if (log.getEntries().size() > 0)
+        lastTerm = log.getEntries().back().getTerm();
+
+    RequestVoteMessage Voterequest(node.getid(), currentTerm, log.getEntries().size(), lastTerm);
+
+    for (auto targetNode : cluster)
     {
-        currentTerm += 1;
-        role = Role::CANDIDATE;
-        votedFor = node.getid();
-        int port;
-        std::string addr;
-        votesReceived.insert(node.getid());
-        int lastTerm = 0;
-        if (log.getEntries().size())
-            lastTerm = log.getEntries()[log.getEntries().size() - 1].getTerm();
-        RequestVoteMessage Voterequest(node.getid(), currentTerm, log.getEntries().size(), lastTerm);
-        for (auto node : cluster)
-        {
-            network.sendRequestVote(sendRequestVoteStruct(node, Voterequest));
-        }
-        // colocar um random de timeout aqui
+        if (targetNode.getid() != node.getid()) // Não envia para si mesmo
+            network.sendRequestVote(sendRequestVoteStruct(targetNode, node, Voterequest));
     }
-    else
-        return;
 }
-void raft::receiveElectionMessage(RequestVoteMessage msg)
+void raft::receiveElectionMessage(RequestVoteMessage msg, NodeInfo candidate)
 {
+    std::cout << "[Nó " << node.getid() << "] Recebi RequestVote do Nó " 
+              << msg.getcID() << " (Termo: " << msg.getcTerm() << ")" << std::endl;
     if (msg.getcTerm() > currentTerm)
     {
         currentTerm = msg.getcTerm();
         role = Role::FOLLOWER;
         votedFor = -1;
     }
+    
     int lastTerm = 0;
     if (log.getEntries().size() > 0)
         lastTerm = log.getEntries()[log.getEntries().size() - 1].getTerm();
+        
     bool logOK = (msg.getcLogTerm() > lastTerm) || (msg.getcLogTerm() == lastTerm && msg.getcLogLength() >= log.getEntries().size());
+    
+    // Se concedemos o voto, precisamos esperar o novo líder assumir!
     if (msg.getcTerm() == currentTerm && logOK && (votedFor == -1 || votedFor == msg.getcID()))
     {
         votedFor = msg.getcID();
-        network.sendVoteResponse(sendVoteResponseStruct(currentLeader, node.getid(), currentTerm, true));
+        
+        // 🚨 CORREÇÃO CRÍTICA AQUI 🚨
+        resetElectionTimeout(); 
+        
+        network.sendVoteResponse(sendVoteResponseStruct(candidate, node.getid(), currentTerm, true));
     }
-    else
-        network.sendVoteResponse(sendVoteResponseStruct(currentLeader, node.getid(), currentTerm, false));
-    return;
+    else {
+        network.sendVoteResponse(sendVoteResponseStruct(candidate, node.getid(), currentTerm, false));
+    }
 }
 
-void raft::collectVotes(int VoterID, int Term, bool granted)
+void raft::collectVotes(int VoterID, int Term, bool granted) 
 {
-    if (role == Role::CANDIDATE && Term == currentTerm && granted)
-        votesReceived.insert(VoterID);
-    if (votesReceived.size() > ((cluster.size() + 1) / 2))
-    {
-        role = Role::LEADER;
-        // dar um jeito de cancelar o election timer nessa linha em especifico
-        for (auto follower : cluster)
-        {
-            sentLength[follower.getid()] = log.getEntries().size();
-            ackedLength[follower.getid()] = 0;
-            replicateLog(follower);
-        }
-    }
-    else if (Term > currentTerm)
-    {
+    // Se alguém respondeu com um termo maior que o meu, eu perdi a eleição. Volto a ser seguidor.
+    if (Term > currentTerm) {
         currentTerm = Term;
         role = Role::FOLLOWER;
         votedFor = -1;
-        // dar um jeito de cancelar o election timer nessa linha em especifico
+        
+        // 🚨 CORREÇÃO AQUI TAMBÉM: Volto a ser seguidor pacífico e reseto o tempo.
+        resetElectionTimeout(); 
+        return;
+    }
+
+    if (role == Role::CANDIDATE && Term == currentTerm && granted) {
+        votesReceived.insert(VoterID);
+        
+        // Maioria para o total de nós do cluster
+        int maioria = (cluster.size() + 1) / 2 + 1;
+
+        if (votesReceived.size() >= maioria) {
+            role = Role::LEADER;
+            std::cout << "\n👑 [Nó " << node.getid() << "] RECEBEU MAIORIA E SE TORNOU O LÍDER (Termo: " 
+                      << currentTerm << ")! 👑\n" << std::endl;
+                      
+            sendHeartbeats(); 
+        }
     }
 }
 
@@ -114,6 +145,8 @@ void raft::replicateLog(NodeInfo follower){
 }
 
 void raft::followerReceiveAppendEntries(NodeInfo leader, int term, int prefixLen, int prefixTerm, int leaderCommit, std::vector<LogEntry> suffix){
+    lastHeartBeat = std::chrono::steady_clock::now();
+    std::cout << "[Nó " << node.getid() << "] Recebeu heartbeat do Líder " << leader.getid() << std::endl;
     if (term > currentTerm) {
         currentTerm = term;
         votedFor = -1;
@@ -190,5 +223,186 @@ void raft::commitLog(){
             commitLength++;
         }
         else break;
+    }
+}
+void raft::processMessage(std::unique_ptr<messageBase> msg)
+{
+    if (!msg) return;
+
+    switch (msg->msgtype)
+    {
+        case messageType::SEND_REQUEST_VOTE:
+        {
+            auto req = static_cast<sendRequestVoteStruct*>(msg.get());
+            // Repassa o candidato para a função de eleição
+            receiveElectionMessage(req->msg, req->candidate);
+            break;
+        }
+
+        case messageType::SEND_VOTE_RESPONSE:
+        {
+            auto res = static_cast<sendVoteResponseStruct*>(msg.get());
+            // Contabiliza o voto recebido (se concedido ou rejeitado)
+            collectVotes(res->voterID, res->currentTerm, res->granted);
+            break;
+        }
+
+        case messageType::SEND_CLIENT_COMMAND:
+        {
+            auto cmd = static_cast<sendClientCommandStruct*>(msg.get());
+            // Repassa o comando do cliente para a máquina de estados / replicação
+            broadcastClientMessage(cmd->msg);
+            break;
+        }
+
+        case messageType::SEND_APPEND_ENTRIES:
+        {
+            auto ae = static_cast<sendAppendEntriesStruct*>(msg.get());
+            
+            // O protocolo precisa do NodeInfo completo do Líder.
+            // Vamos procurá-lo no cluster pelo ID enviado na mensagem.
+            NodeInfo leaderNode(ae->leaderId, -1, ""); 
+            if (node.getid() == ae->leaderId)
+            {
+                leaderNode = node;
+            }
+            else
+            {
+                for (auto& member : cluster)
+                {
+                    if (member.getid() == ae->leaderId)
+                    {
+                        leaderNode = member;
+                        break;
+                    }
+                }
+            }
+
+            // Invoca a validação e escrita dos logs recebidos do Líder
+            followerReceiveAppendEntries(
+                leaderNode, 
+                ae->currentTerm, 
+                ae->prefixLen, 
+                ae->prefixTerm, 
+                ae->commitLength, 
+                ae->suffix
+            );
+            break;
+        }
+
+        case messageType::SEND_APPEND_ACK:
+        {
+            auto ackMsg = static_cast<sendAppendAckStruct*>(msg.get());
+            // Processa a confirmação de escrita de log vinda de um seguidor
+            logAcknowledgment(
+                ackMsg->followerId, 
+                ackMsg->currentTerm, 
+                ackMsg->ack, 
+                ackMsg->granted
+            );
+            break;
+        }
+    }
+}
+void raft::addClusterMember(const NodeInfo& member) {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    cluster.push_back(member);
+}
+
+// Sorteia um tempo de eleição entre 1500ms e 3000ms (ajustável)
+void raft::resetElectionTimeout() {
+    std::random_device rd;
+    // O operador ^ (XOR) mistura a aleatoriedade do OS com o ID único do seu Nó
+    std::mt19937 gen(rd() ^ node.getid()); 
+    std::uniform_int_distribution<> distr(1500, 3000); 
+    
+    timeout = std::chrono::milliseconds(distr(gen));
+    lastHeartBeat = std::chrono::steady_clock::now();
+    
+    // Imprime na tela o tempo exato sorteado para você auditar:
+    std::cout << "[Nó " << node.getid() << "] Novo timeout sorteado: " 
+              << timeout.count() << "ms" << std::endl;
+}
+
+// Inicia o nó de forma assíncrona
+void raft::start() {
+    if (running) return;
+    running = true;
+
+    // 1. Lança a thread de escuta da rede usando o callback unificado
+    listenerThread = std::thread([this]() {
+        network.startListening(node.getport(), [this](std::unique_ptr<messageBase> msg) {
+            // Toda mensagem da rede entra protegida pelo Mutex
+            std::lock_guard<std::mutex> lock(stateMutex);
+            this->processMessage(std::move(msg));
+        });
+    });
+
+    // 2. Lança a thread de gerenciamento de tempo (Election Timeout / Heartbeats)
+    tickerThread = std::thread(&raft::tickerLoop, this);
+    
+    std::cout << "[Nó " << node.getid() << "] Inicializado com sucesso." << std::endl;
+}
+
+// Desliga o nó limpando as threads paralelas
+void raft::stop() {
+    if (!running) return;
+    running = false;
+    
+    // Força o encerramento seguro das threads
+    if (tickerThread.joinable()) tickerThread.join();
+    // Nota: A listenerThread pode ficar travada no accept(). Em produção, fecha-se o socket de fora.
+    if (listenerThread.joinable()) listenerThread.detach(); 
+}
+
+// O "Coração" do Raft: Roda a cada 100ms checando se o tempo expirou
+void raft::tickerLoop() {
+    while (running) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::lock_guard<std::mutex> lock(stateMutex);
+
+        auto now = std::chrono::steady_clock::now();
+
+        if (role == Role::LEADER) {
+            // Se eu sou o Líder, envio atualizações/heartbeats periódicos (ex: a cada 500ms)
+            static auto lastHeartbeatSent = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastHeartbeatSent).count() >= 500) {
+                sendHeartbeats();
+                lastHeartbeatSent = now;
+            }
+        } 
+        else {
+            // Se sou Seguidor ou Candidato, verifico se o líder falhou (Timeout)
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastHeartBeat) > timeout) {
+                std::cout << "[Nó " << node.getid() << "] Timeout de eleição detectado! Iniciando Eleição..." << std::endl;
+                
+                // Executa a sua função original de eleição
+                // Importante: certifique-se de que dentro de leaderCrashed() você chame resetElectionTimeout()
+                leaderCrashed(); 
+                resetElectionTimeout(); 
+            }
+        }
+    }
+}
+
+// Envia heartbeats vazios para manter a autoridade sobre os seguidores
+void raft::sendHeartbeats() {
+    for (const auto& follower : cluster) {
+        // Envia uma mensagem AppendEntries vazia (sem sufixo) para atuar como Heartbeat
+        // Ajuste os parâmetros de acordo com o estado do seu Log
+        std::vector<LogEntry> emptySuffix;
+        int prefixLen = log.getEntries().size();
+        int prefixTerm = (prefixLen > 0) ? log.getEntries()[prefixLen - 1].getTerm() : 0;
+
+        sendAppendEntriesStruct hb(
+            follower, 
+            node.getid(), 
+            currentTerm, 
+            prefixLen, 
+            prefixTerm, 
+            commitLength, 
+            emptySuffix
+        );
+        network.sendAppendEntries(hb);
     }
 }
