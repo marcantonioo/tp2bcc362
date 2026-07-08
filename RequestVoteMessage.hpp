@@ -1,3 +1,5 @@
+#ifndef REQUESTVOTEMESSAGE_HPP
+#define REQUESTVOTEMESSAGE_HPP
 #include "Log.h"
 
 class RequestVoteMessage{
@@ -18,3 +20,4 @@ public:
         this->cTerm = lastTerm;
     }
 };
+#endif

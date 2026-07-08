@@ -1,7 +1,7 @@
 #ifndef LOGENTRY_H
 #define LOGENTRY_H
 
-#include <string.h>
+#include <string>
 
 enum class Operation
 {
@@ -33,6 +33,7 @@ class LogEntry
 public:
     LogEntry(ClientCommand Operation, int Term) : operation(Operation), term(Term) {}
     int getTerm() { return term; }
+    ClientCommand getOperation(){return operation;}
 };
 
 #endif

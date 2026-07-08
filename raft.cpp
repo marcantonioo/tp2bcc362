@@ -34,7 +34,7 @@ void raft::leaderCrashed()
         RequestVoteMessage Voterequest(node.getid(), currentTerm, log.getEntries().size(), lastTerm);
         for (auto node : cluster)
         {
-            network.sendRequestVote(node, Voterequest);
+            network.sendRequestVote(sendRequestVoteStruct(node, Voterequest));
         }
         // colocar um random de timeout aqui
     }
@@ -56,10 +56,10 @@ void raft::receiveElectionMessage(RequestVoteMessage msg)
     if (msg.getcTerm() == currentTerm && logOK && (votedFor == -1 || votedFor == msg.getcID()))
     {
         votedFor = msg.getcID();
-        network.sendVoteResponse(currentLeader, node.getid(), currentTerm, true);
+        network.sendVoteResponse(sendVoteResponseStruct(currentLeader, node.getid(), currentTerm, true));
     }
     else
-        network.sendVoteResponse(currentLeader, node.getid(), currentTerm, false);
+        network.sendVoteResponse(sendVoteResponseStruct(currentLeader, node.getid(), currentTerm, false));
     return;
 }
 
@@ -100,7 +100,7 @@ void raft::broadcastClientMessage(ClientCommand msg)
     }
     else
     {
-        network.sendClientCommand(currentLeader, msg);
+        network.sendClientCommand(sendClientCommandStruct(currentLeader, msg));
     }
 }
 
@@ -110,7 +110,7 @@ void raft::replicateLog(NodeInfo follower){
     Log suffix(entries);
     int prefixTerm = 0;
     if (prefixLength > 0) prefixTerm = log.getEntries()[prefixLength-1].getTerm();
-    network.sendAppendEntries(follower, node.getid(), currentTerm, prefixLength, prefixTerm, commitLength, suffix.getEntries());
+    network.sendAppendEntries(sendAppendEntriesStruct(follower, node.getid(), currentTerm, prefixLength, prefixTerm, commitLength, suffix.getEntries()));
 }
 
 void raft::followerReceiveAppendEntries(NodeInfo leader, int term, int prefixLen, int prefixTerm, int leaderCommit, std::vector<LogEntry> suffix){
@@ -152,7 +152,7 @@ void raft::followerAppend(int prefixLen, int leaderCommit, std::vector<LogEntry>
             int a =2;
     }
     commitLength = leaderCommit;
-    network.sendAppendAck(node, currentLeader.getid(), currentTerm, log.getEntries().size(), true);
+    network.sendAppendAck(sendAppendAckStruct(node, currentLeader.getid(), currentTerm, log.getEntries().size(), true));
 }
 
 void raft::logAcknowledgment(int followerID, int term, int ack, bool success){

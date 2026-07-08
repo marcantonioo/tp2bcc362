@@ -1,3 +1,6 @@
+#ifndef NODEINFO_H
+#define NODEINFO_H
+
 #include <string>
 
 class NodeInfo{
@@ -18,3 +21,5 @@ public:
     std::string getaddress(){return address;}
 
 };
+
+#endif

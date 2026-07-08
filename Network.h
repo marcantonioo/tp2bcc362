@@ -1,51 +1,52 @@
-#include "raft.h"
+#ifndef NETWORK_H
+#define NETWORK_H
 #include "RequestVoteMessage.hpp"
+#include "NodeInfo.hpp"
+#include <memory>
 
+
+
+enum struct messageType{
+    SEND_REQUEST_VOTE,
+    SEND_VOTE_RESPONSE,
+    SEND_CLIENT_COMMAND,
+    SEND_APPEND_ENTRIES,
+    SEND_APPEND_ACK
+};
 
 struct messageBase{
     messageType msgtype;
     messageBase(messageType t):msgtype(t){}
 };
-class Network : messageBase{
-public:
-    void sendRequestVote(sendRequestVote msg);
-    void sendVoteResponse(sendVoteResponse msg);
-    void sendClientCommand(sendClientCommand msg);
-    void sendAppendEntries(sendAppendEntries msg);
-    void sendAppendAck(sendAppendAck msg);
-    
 
-    messageType receiveMessage();
-    void startListening(int port);
-};
 
-struct sendRequestVote : messageBase{
+struct sendRequestVoteStruct : messageBase{
     NodeInfo& target;
     RequestVoteMessage msg;
-    sendRequestVote(NodeInfo& target, RequestVoteMessage msg):messageBase(messageType::SEND_REQUEST_VOTE), target(target), msg(msg){}
+    sendRequestVoteStruct(NodeInfo& target, RequestVoteMessage msg):messageBase(messageType::SEND_REQUEST_VOTE), target(target), msg(msg){}
 };
 
 
 
-struct sendVoteResponse: messageBase{
+struct sendVoteResponseStruct: messageBase{
     NodeInfo& target; 
     int voterID; 
     int currentTerm; 
     bool granted;
-    sendVoteResponse(NodeInfo& target, int VoterID, int CurrentTerm, bool granted):messageBase(messageType::SEND_VOTE_RESPONSE), target(target), voterID(VoterID), currentTerm(CurrentTerm), granted(granted){}
+    sendVoteResponseStruct(NodeInfo& target, int VoterID, int CurrentTerm, bool granted):messageBase(messageType::SEND_VOTE_RESPONSE), target(target), voterID(VoterID), currentTerm(CurrentTerm), granted(granted){}
 };
-struct sendClientCommand : messageBase{
+struct sendClientCommandStruct : messageBase{
     const NodeInfo& target;
     const ClientCommand& msg;
 
-    sendClientCommand(const NodeInfo& target, const ClientCommand& msg)
+    sendClientCommandStruct(const NodeInfo& target, const ClientCommand& msg)
         : messageBase(messageType::SEND_CLIENT_COMMAND),
           target(target),
           msg(msg)
     {}
 };
 
-struct sendAppendEntries : messageBase{
+struct sendAppendEntriesStruct : messageBase{
     const NodeInfo& target;
     int leaderId;
     int currentTerm;
@@ -54,7 +55,7 @@ struct sendAppendEntries : messageBase{
     int commitLength;
     std::vector<LogEntry> suffix;
 
-    sendAppendEntries(const NodeInfo& target,
+    sendAppendEntriesStruct(const NodeInfo& target,
                       int leaderId,
                       int currentTerm,
                       int prefixLen,
@@ -72,14 +73,14 @@ struct sendAppendEntries : messageBase{
     {}
 };
 
-struct sendAppendAck : messageBase{
+struct sendAppendAckStruct : messageBase{
     NodeInfo target;
     int followerId;
     int currentTerm;
     int ack;
     bool granted;
 
-    sendAppendAck(const NodeInfo& target,
+    sendAppendAckStruct(const NodeInfo& target,
                   int followerId,
                   int currentTerm,
                   int ack,
@@ -93,10 +94,17 @@ struct sendAppendAck : messageBase{
     {}
 };
 
-enum struct messageType{
-    SEND_REQUEST_VOTE,
-    SEND_VOTE_RESPONSE,
-    SEND_CLIENT_COMMAND,
-    SEND_APPEND_ENTRIES,
-    SEND_APPEND_ACK
+class Network{
+    int sockfd;
+public:
+    void sendRequestVote(sendRequestVoteStruct msg);
+    void sendVoteResponse(sendVoteResponseStruct msg);
+    void sendClientCommand(sendClientCommandStruct msg);
+    void sendAppendEntries(sendAppendEntriesStruct msg);
+    void sendAppendAck(sendAppendAckStruct msg);
+    
+    std::unique_ptr<messageBase> receiveMessage();
+    void startListening(int port);
 };
+
+#endif
