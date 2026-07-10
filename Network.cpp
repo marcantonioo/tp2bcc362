@@ -12,15 +12,21 @@
 #include <functional>
 
 
+bool readAllBytes(int sock, void* buf, size_t size) {
+    char* ptr = static_cast<char*>(buf);
+    size_t totalRead = 0;
+    while (totalRead < size) {
+        ssize_t bytesRead = recv(sock, ptr + totalRead, size - totalRead, 0);
+        if (bytesRead <= 0) return false; // Conexão fechada ou erro
+        totalRead += bytesRead;
+    }
+    return true;
+}
+
 void Network::startListening(int port, std::function<void(std::unique_ptr<messageBase>)> messageHandler)
 {
     int listenfd = socket(AF_INET, SOCK_STREAM, 0);
-
-    if (listenfd < 0)
-    {
-        perror("socket");
-        return;
-    }
+    if (listenfd < 0) { perror("socket"); return; }
 
     int opt = 1;
     setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -30,20 +36,12 @@ void Network::startListening(int port, std::function<void(std::unique_ptr<messag
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     serverAddr.sin_port = htons(port);
 
-    if (bind(listenfd,
-             (sockaddr*)&serverAddr,
-             sizeof(serverAddr)) < 0)
-    {
-        perror("bind");
-        close(listenfd);
-        return;
+    if (bind(listenfd, (sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        perror("bind"); close(listenfd); return;
     }
 
-    if (listen(listenfd, 5) < 0)
-    {
-        perror("listen");
-        close(listenfd);
-        return;
+    if (listen(listenfd, 5) < 0) {
+        perror("listen"); close(listenfd); return;
     }
 
     std::cout << "Escutando na porta " << port << std::endl;
@@ -52,178 +50,122 @@ void Network::startListening(int port, std::function<void(std::unique_ptr<messag
     {
         sockaddr_in clientAddr{};
         socklen_t clientLen = sizeof(clientAddr);
+        
+        // Este é o socket real da conexão!
+        int clientSock = accept(listenfd, (sockaddr*)&clientAddr, &clientLen);
+        if (clientSock < 0) { continue; }
 
-        sockfd = accept(listenfd, (sockaddr*)&clientAddr, &clientLen);
-        if (sockfd < 0) {
-            perror("accept");
-            continue;
-        }
-
-        auto msg = receiveMessage();
-        if (msg)
-        {
-            // Em vez de só printar, despacha a mensagem para o Handler (Raft)!
+        // Passamos o socket correto para a função de leitura
+        auto msg = receiveMessage(clientSock);
+        
+        if (msg && messageHandler) {
             messageHandler(std::move(msg));
         }
 
-        close(sockfd);
+        close(clientSock);
     }
 }
-std::unique_ptr<messageBase> Network::receiveMessage()
+std::unique_ptr<messageBase> Network::receiveMessage(int clientSock)
 {
     messageType type;
-    recv(sockfd, &type, sizeof(type), 0);
+    if (!readAllBytes(clientSock, &type, sizeof(type))) return nullptr;
 
     switch (type)
     {
+        case messageType::SEND_REQUEST_VOTE:
+        {
+            int size;
+            if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
+            std::vector<char> nodeBuffer(size);
+            if (!readAllBytes(clientSock, nodeBuffer.data(), size)) return nullptr;
+            NodeInfo candidate = NodeInfoSerializer::deserialize(nodeBuffer);
+
+            if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
+            std::vector<char> msgBuffer(size);
+            if (!readAllBytes(clientSock, msgBuffer.data(), size)) return nullptr;
+            RequestVoteMessage msg = RequestVoteMessageSerializer::deserialize(msgBuffer);
+
+            return std::make_unique<sendRequestVoteStruct>(NodeInfo(), candidate, msg);
+        }
+
         case messageType::SEND_VOTE_RESPONSE:
         {
             int size;
-            recv(sockfd, &size, sizeof(size), 0);
-
+            if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
             std::vector<char> nodeBuffer(size);
-            recv(sockfd, nodeBuffer.data(), size, 0);
-
+            if (!readAllBytes(clientSock, nodeBuffer.data(), size)) return nullptr;
             NodeInfo target = NodeInfoSerializer::deserialize(nodeBuffer);
 
-            int voterID;
-            int currentTerm;
+            int voterID, currentTerm;
             bool granted;
+            if (!readAllBytes(clientSock, &voterID, sizeof(voterID))) return nullptr;
+            if (!readAllBytes(clientSock, &currentTerm, sizeof(currentTerm))) return nullptr;
+            if (!readAllBytes(clientSock, &granted, sizeof(granted))) return nullptr;
 
-            recv(sockfd, &voterID, sizeof(voterID), 0);
-            recv(sockfd, &currentTerm, sizeof(currentTerm), 0);
-            recv(sockfd, &granted, sizeof(granted), 0);
-
-            return std::make_unique<sendVoteResponseStruct>(
-                target,
-                voterID,
-                currentTerm,
-                granted
-            );
-        }
-
-        case messageType::SEND_APPEND_ACK:
-        {
-            int size;
-            recv(sockfd, &size, sizeof(size), 0);
-
-            std::vector<char> nodeBuffer(size);
-            recv(sockfd, nodeBuffer.data(), size, 0);
-
-            NodeInfo target = NodeInfoSerializer::deserialize(nodeBuffer);
-
-            int followerId;
-            int currentTerm;
-            int ack;
-            bool granted;
-
-            recv(sockfd, &followerId, sizeof(followerId), 0);
-            recv(sockfd, &currentTerm, sizeof(currentTerm), 0);
-            recv(sockfd, &ack, sizeof(ack), 0);
-            recv(sockfd, &granted, sizeof(granted), 0);
-
-            return std::make_unique<sendAppendAckStruct>(
-                target,
-                followerId,
-                currentTerm,
-                ack,
-                granted
-            );
+            return std::make_unique<sendVoteResponseStruct>(target, voterID, currentTerm, granted);
         }
 
         case messageType::SEND_APPEND_ENTRIES:
         {
             int size;
-            recv(sockfd, &size, sizeof(size), 0);
-
+            if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
             std::vector<char> nodeBuffer(size);
-            recv(sockfd, nodeBuffer.data(), size, 0);
-
+            if (!readAllBytes(clientSock, nodeBuffer.data(), size)) return nullptr;
             NodeInfo target = NodeInfoSerializer::deserialize(nodeBuffer);
 
-            int leaderId;
-            int currentTerm;
-            int prefixLen;
-            int prefixTerm;
-            int commitLength;
-
-            recv(sockfd, &leaderId, sizeof(leaderId), 0);
-            recv(sockfd, &currentTerm, sizeof(currentTerm), 0);
-            recv(sockfd, &prefixLen, sizeof(prefixLen), 0);
-            recv(sockfd, &prefixTerm, sizeof(prefixTerm), 0);
-            recv(sockfd, &commitLength, sizeof(commitLength), 0);
-
-            int logCount;
-            recv(sockfd, &logCount, sizeof(logCount), 0);
+            int leaderId, currentTerm, prefixLen, prefixTerm, commitLength, logCount;
+            if (!readAllBytes(clientSock, &leaderId, sizeof(leaderId))) return nullptr;
+            if (!readAllBytes(clientSock, &currentTerm, sizeof(currentTerm))) return nullptr;
+            if (!readAllBytes(clientSock, &prefixLen, sizeof(prefixLen))) return nullptr;
+            if (!readAllBytes(clientSock, &prefixTerm, sizeof(prefixTerm))) return nullptr;
+            if (!readAllBytes(clientSock, &commitLength, sizeof(commitLength))) return nullptr;
+            if (!readAllBytes(clientSock, &logCount, sizeof(logCount))) return nullptr;
 
             std::vector<LogEntry> suffix;
-
-            for (int i = 0; i < logCount; i++)
-            {
-                recv(sockfd, &size, sizeof(size), 0);
-
+            for (int i = 0; i < logCount; i++) {
+                if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
                 std::vector<char> logBuffer(size);
-                recv(sockfd, logBuffer.data(), size, 0);
-
+                if (!readAllBytes(clientSock, logBuffer.data(), size)) return nullptr;
                 suffix.push_back(LogEntrySerializer::deserialize(logBuffer));
             }
 
-            return std::make_unique<sendAppendEntriesStruct>(
-                target,
-                leaderId,
-                currentTerm,
-                prefixLen,
-                prefixTerm,
-                commitLength,
-                suffix
-            );
+            return std::make_unique<sendAppendEntriesStruct>(target, leaderId, currentTerm, prefixLen, prefixTerm, commitLength, suffix);
+        }
+
+        case messageType::SEND_APPEND_ACK:
+        {
+            int size;
+            if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
+            std::vector<char> nodeBuffer(size);
+            if (!readAllBytes(clientSock, nodeBuffer.data(), size)) return nullptr;
+            NodeInfo target = NodeInfoSerializer::deserialize(nodeBuffer);
+
+            int followerId, currentTerm, ack;
+            bool granted;
+            if (!readAllBytes(clientSock, &followerId, sizeof(followerId))) return nullptr;
+            if (!readAllBytes(clientSock, &currentTerm, sizeof(currentTerm))) return nullptr;
+            if (!readAllBytes(clientSock, &ack, sizeof(ack))) return nullptr;
+            if (!readAllBytes(clientSock, &granted, sizeof(granted))) return nullptr;
+
+            return std::make_unique<sendAppendAckStruct>(target, followerId, currentTerm, ack, granted);
         }
 
         case messageType::SEND_CLIENT_COMMAND:
         {
-                int nodeSize;
-                recv(sockfd, &nodeSize, sizeof(nodeSize), 0);
-
-                std::vector<char> nodeBuffer(nodeSize);
-                recv(sockfd, nodeBuffer.data(), nodeSize, 0);
-
-                NodeInfo target =
-                    NodeInfoSerializer::deserialize(nodeBuffer);
-
-                int commandSize;
-                recv(sockfd, &commandSize, sizeof(commandSize), 0);
-
-                std::vector<char> commandBuffer(commandSize);
-                recv(sockfd, commandBuffer.data(), commandSize, 0);
-
-                ClientCommand command =
-                    ClientCommandSerializer::deserialize(commandBuffer);
-
-                return std::make_unique<sendClientCommandStruct>(
-                    target,
-                    command
-                );
-        }
-
-        case messageType::SEND_REQUEST_VOTE:
-        {
             int size;
-            recv(sockfd, &size, sizeof(size), 0);
-
+            if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
             std::vector<char> nodeBuffer(size);
-            recv(sockfd, nodeBuffer.data(), size, 0);
-            NodeInfo candidate = NodeInfoSerializer::deserialize(nodeBuffer); // O info de quem pediu o voto!
+            if (!readAllBytes(clientSock, nodeBuffer.data(), size)) return nullptr;
+            NodeInfo target = NodeInfoSerializer::deserialize(nodeBuffer);
 
-            recv(sockfd, &size, sizeof(size), 0);
-            std::vector<char> msgBuffer(size);
-            recv(sockfd, msgBuffer.data(), size, 0);
-            RequestVoteMessage msg = RequestVoteMessageSerializer::deserialize(msgBuffer);
+            if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
+            std::vector<char> commandBuffer(size);
+            if (!readAllBytes(clientSock, commandBuffer.data(), size)) return nullptr;
+            ClientCommand command = ClientCommandSerializer::deserialize(commandBuffer);
 
-            // Repassamos um NodeInfo vazio como target (irrelevante agora), e o candidate real
-            return std::make_unique<sendRequestVoteStruct>(NodeInfo(), candidate, msg);
+            return std::make_unique<sendClientCommandStruct>(target, command);
         }
     }
-
     return nullptr;
 }
 

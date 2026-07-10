@@ -1,5 +1,3 @@
-#ifndef REQUESTVOTEMESSAGESERIALIZER_HPP
-#define REQUESTVOTEMESSAGESERIALIZER_HPP
 #include "RequestVoteMessageSerializer.hpp"
 #include <cstring>
 
@@ -12,6 +10,7 @@ std::vector<char> RequestVoteMessageSerializer::serialize(RequestVoteMessage msg
     int logLength = msg.getcLogLength();
     int logTerm = msg.getcLogTerm();
 
+    // A ordem de inserção aqui define a ordem dos bytes
     buffer.insert(buffer.end(), (char*)&id, (char*)&id + sizeof(id));
     buffer.insert(buffer.end(), (char*)&term, (char*)&term + sizeof(term));
     buffer.insert(buffer.end(), (char*)&logLength, (char*)&logLength + sizeof(logLength));
@@ -23,9 +22,9 @@ std::vector<char> RequestVoteMessageSerializer::serialize(RequestVoteMessage msg
 RequestVoteMessage RequestVoteMessageSerializer::deserialize(const std::vector<char> buffer)
 {
     const char* ptr = buffer.data();
-
     int id, term, logLength, logTerm;
 
+    // A ordem de extração deve ser idêntica à de inserção
     memcpy(&id, ptr, sizeof(id));
     ptr += sizeof(id);
 
@@ -39,5 +38,3 @@ RequestVoteMessage RequestVoteMessageSerializer::deserialize(const std::vector<c
 
     return RequestVoteMessage(id, term, logLength, logTerm);
 }
-
-#endif

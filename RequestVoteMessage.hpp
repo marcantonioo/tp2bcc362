@@ -1,23 +1,30 @@
 #ifndef REQUESTVOTEMESSAGE_HPP
 #define REQUESTVOTEMESSAGE_HPP
-#include "Log.h"
 
-class RequestVoteMessage{
+class RequestVoteMessage {
 private:
     int cID;
     int cTerm;
     int cLogLength;
     int cLogTerm;
+
 public:
-    int getcTerm(){return cTerm;}
-    int getcLogLength(){return cLogLength;}
-    int getcLogTerm(){return cLogTerm;}
-    int getcID(){return cID;}
-    RequestVoteMessage(int nodeID, int currentTerm, int logLength, int lastTerm){
-        this->cID = nodeID; 
-        this->cTerm = currentTerm;
-        this->cLogLength = logLength;
-        this->cTerm = lastTerm;
+    // Construtor vazio necessário para serialização
+    RequestVoteMessage() : cID(-1), cTerm(-1), cLogLength(-1), cLogTerm(-1) {}
+
+    // Construtor com a ordem EXATA que estamos usando no raft.cpp
+    RequestVoteMessage(int id, int term, int logLength, int logTerm) {
+        cID = id;
+        cTerm = term;
+        cLogLength = logLength;
+        cLogTerm = logTerm;
     }
+
+    // Getters blindados
+    int getcID() const { return cID; }
+    int getcTerm() const { return cTerm; }
+    int getcLogLength() const { return cLogLength; }
+    int getcLogTerm() const { return cLogTerm; }
 };
+
 #endif

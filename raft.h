@@ -68,6 +68,7 @@ public:
 
     // Método centralizador de processamento que criamos no passo anterior
     void processMessage(std::unique_ptr<messageBase> msg); 
+    Network& getNetwork(){return network;}
 };
 
 #endif

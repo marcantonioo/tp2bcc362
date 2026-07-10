@@ -61,34 +61,35 @@ void raft::receiveElectionMessage(RequestVoteMessage msg, NodeInfo candidate)
 {
     std::cout << "[Nó " << node.getid() << "] Recebi RequestVote do Nó " 
               << msg.getcID() << " (Termo: " << msg.getcTerm() << ")" << std::endl;
+
     if (msg.getcTerm() > currentTerm)
     {
         currentTerm = msg.getcTerm();
         role = Role::FOLLOWER;
         votedFor = -1;
     }
-    
+
     int lastTerm = 0;
     if (log.getEntries().size() > 0)
         lastTerm = log.getEntries()[log.getEntries().size() - 1].getTerm();
-        
-    bool logOK = (msg.getcLogTerm() > lastTerm) || (msg.getcLogTerm() == lastTerm && msg.getcLogLength() >= log.getEntries().size());
-    
-    // Se concedemos o voto, precisamos esperar o novo líder assumir!
+
+    bool logOK = (msg.getcLogTerm() > lastTerm) || 
+                 (msg.getcLogTerm() == lastTerm && msg.getcLogLength() >= log.getEntries().size());
+
     if (msg.getcTerm() == currentTerm && logOK && (votedFor == -1 || votedFor == msg.getcID()))
     {
         votedFor = msg.getcID();
-        
-        // 🚨 CORREÇÃO CRÍTICA AQUI 🚨
         resetElectionTimeout(); 
         
+        // CORREÇÃO: Responder ao CANDIDATO, e não ao "node" (nós mesmos)
         network.sendVoteResponse(sendVoteResponseStruct(candidate, node.getid(), currentTerm, true));
     }
-    else {
+    else
+    {
+        // CORREÇÃO: Responder a recusa ao CANDIDATO
         network.sendVoteResponse(sendVoteResponseStruct(candidate, node.getid(), currentTerm, false));
     }
 }
-
 void raft::collectVotes(int VoterID, int Term, bool granted) 
 {
     // Se alguém respondeu com um termo maior que o meu, eu perdi a eleição. Volto a ser seguidor.
@@ -145,47 +146,60 @@ void raft::replicateLog(NodeInfo follower){
 }
 
 void raft::followerReceiveAppendEntries(NodeInfo leader, int term, int prefixLen, int prefixTerm, int leaderCommit, std::vector<LogEntry> suffix){
+    // Se o pacote for de um Líder defasado (Termo Menor), rejeitamos IMEDIATAMENTE.
+    if (term < currentTerm) {
+        network.sendAppendAck(sendAppendAckStruct(leader, node.getid(), currentTerm, 0, false));
+        return;
+    }
+
+    // Se chegou até aqui, o Líder é legítimo. Reseta o relógio do seguidor.
     lastHeartBeat = std::chrono::steady_clock::now();
-    std::cout << "[Nó " << node.getid() << "] Recebeu heartbeat do Líder " << leader.getid() << std::endl;
+    
+    // Debug limpo para você auditar a rede
+    // std::cout << "[Nó " << node.getid() << "] Recebeu heartbeat do Líder " << leader.getid() << std::endl;
+
     if (term > currentTerm) {
         currentTerm = term;
         votedFor = -1;
-        //cancelar timeout
+        role = Role::FOLLOWER; // Garante que deixamos de ser Candidatos se necessário
     }
+
     if (term == currentTerm){
         role = Role::FOLLOWER;
         currentLeader = leader;
     }
+
     bool logOK = (log.getEntries().size() >= prefixLen) && (prefixLen == 0 || log.getEntries()[prefixLen-1].getTerm() == prefixTerm);
+    
     if (term == currentTerm && logOK){
         followerAppend(prefixLen, leaderCommit, suffix);
-        int ack = prefixLen+suffix.size();
-        //send LogResponse ,nodeID, CurrentTerm, ack, true
+        int ack = prefixLen + suffix.size();
+        
+        // CRÍTICO: Responder ao líder que o log foi anexado com sucesso
+        network.sendAppendAck(sendAppendAckStruct(leader, node.getid(), currentTerm, ack, true));
     }
-    else
-        //send LogResponse ,nodeID, CurrentTerm, 0, false
-        return;
+    else {
+        // CRÍTICO: Responder ao líder que o log falhou (Inconsistência de prefixo)
+        network.sendAppendAck(sendAppendAckStruct(leader, node.getid(), currentTerm, 0, false));
+    }
 }
 
 void raft::followerAppend(int prefixLen, int leaderCommit, std::vector<LogEntry> suffix){
     if (suffix.size() > 0 && log.getEntries().size() > prefixLen){
-        int index = log.getEntries().size() > prefixLen + suffix.size()
-        ?prefixLen + suffix.size()-1
-        :log.getEntries().size()-1;
-        if (log.getEntries()[index].getTerm()!=suffix[index-prefixLen].getTerm())
+        int index = log.getEntries().size() > prefixLen + suffix.size() ? prefixLen + suffix.size()-1 : log.getEntries().size()-1;
+        if (log.getEntries()[index].getTerm() != suffix[index-prefixLen].getTerm())
             log.truncate(prefixLen);
     }
-    if(prefixLen+suffix.size() > log.getEntries().size())
-        for(int i = log.getEntries().size()-prefixLen; i < suffix.size(); i++)
+    
+    if(prefixLen + suffix.size() > log.getEntries().size()){
+        for(int i = log.getEntries().size() - prefixLen; i < suffix.size(); i++)
             log.append(suffix[i]);
+    }
     
     if (leaderCommit > commitLength){
-        for (int i = commitLength; i < leaderCommit-1; i++)
-            //deliver commit to the aplication
-            int a =2;
+        // CRÍTICO: Apenas atualizamos o commitLength, removido o código morto "int a = 2;"
+        commitLength = leaderCommit; 
     }
-    commitLength = leaderCommit;
-    network.sendAppendAck(sendAppendAckStruct(node, currentLeader.getid(), currentTerm, log.getEntries().size(), true));
 }
 
 void raft::logAcknowledgment(int followerID, int term, int ack, bool success){
@@ -234,7 +248,7 @@ void raft::processMessage(std::unique_ptr<messageBase> msg)
         case messageType::SEND_REQUEST_VOTE:
         {
             auto req = static_cast<sendRequestVoteStruct*>(msg.get());
-            // Repassa o candidato para a função de eleição
+            // CORREÇÃO: Passar o candidato junto com a mensagem
             receiveElectionMessage(req->msg, req->candidate);
             break;
         }
