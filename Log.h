@@ -13,7 +13,7 @@ public:
         for (auto entry : entries)
             logentries.push_back(entry);
     }
-    std::vector<LogEntry> getEntries() { return logentries; }
+    std::vector<LogEntry>& getEntries() { return logentries; }
     void append(LogEntry log) { logentries.push_back(log); }
     void truncate(size_t index){
         if (index < logentries.size())

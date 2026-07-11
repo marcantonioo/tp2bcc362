@@ -123,8 +123,12 @@ void raft::broadcastClientMessage(ClientCommand msg)
 {
     if (role == Role::LEADER)
     {
+        std::cout << "\n📝 [Líder " << node.getid() << "] Recebeu comando do cliente: WRITE '" 
+                  << msg.getKey() << "' = '" << msg.getValue() << "'" << std::endl;
+                  
         log.append(LogEntry(msg, currentTerm));
         ackedLength[node.getid()] = log.getEntries().size();
+        
         for (auto follower : cluster)
         {
             replicateLog(follower);
@@ -132,17 +136,40 @@ void raft::broadcastClientMessage(ClientCommand msg)
     }
     else
     {
+        std::cout << "\n⚠️ [Nó " << node.getid() << "] Comando recebido, mas não sou o líder. Ignorando/Redirecionando..." << std::endl;
         network.sendClientCommand(sendClientCommandStruct(currentLeader, msg));
     }
 }
 
 void raft::replicateLog(NodeInfo follower){
-    int prefixLength = sentLength[follower.getid()];
-    std::vector<LogEntry> entries(log.getEntries().begin() + sentLength[follower.getid()], log.getEntries().end());
+    int followerId = follower.getid();
+    
+    int prefixLength = sentLength[followerId]; 
+    
+    auto& originalLog = log.getEntries(); 
+    
+    std::vector<LogEntry> entries;
+    
+    if (prefixLength < originalLog.size()) {
+        entries.assign(originalLog.begin() + prefixLength, originalLog.end());
+    }
+    
     Log suffix(entries);
     int prefixTerm = 0;
-    if (prefixLength > 0) prefixTerm = log.getEntries()[prefixLength-1].getTerm();
-    network.sendAppendEntries(sendAppendEntriesStruct(follower, node.getid(), currentTerm, prefixLength, prefixTerm, commitLength, suffix.getEntries()));
+    
+    if (prefixLength > 0 && prefixLength <= originalLog.size()) {
+        prefixTerm = originalLog[prefixLength - 1].getTerm();
+    }
+    
+    network.sendAppendEntries(sendAppendEntriesStruct(
+        follower, 
+        node.getid(), 
+        currentTerm, 
+        prefixLength, 
+        prefixTerm, 
+        commitLength, 
+        suffix.getEntries()
+    ));
 }
 
 void raft::followerReceiveAppendEntries(NodeInfo leader, int term, int prefixLen, int prefixTerm, int leaderCommit, std::vector<LogEntry> suffix){
@@ -192,12 +219,16 @@ void raft::followerAppend(int prefixLen, int leaderCommit, std::vector<LogEntry>
     }
     
     if(prefixLen + suffix.size() > log.getEntries().size()){
-        for(int i = log.getEntries().size() - prefixLen; i < suffix.size(); i++)
+        for(int i = log.getEntries().size() - prefixLen; i < suffix.size(); i++) {
             log.append(suffix[i]);
+            
+            std::cout << "💾 [Nó " << node.getid() << "] Replicou nova entrada no Log: '" 
+                      << suffix[i].getOperation().getKey() << "' = '" 
+                      << suffix[i].getOperation().getValue() << "'" << std::endl;
+        }
     }
     
     if (leaderCommit > commitLength){
-        // CRÍTICO: Apenas atualizamos o commitLength, removido o código morto "int a = 2;"
         commitLength = leaderCommit; 
     }
 }
