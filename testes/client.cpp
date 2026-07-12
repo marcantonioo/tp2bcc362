@@ -1,9 +1,11 @@
- 
 #include "../Network.h"
 #include "../LogEntry.h"
 #include "../NodeInfo.hpp"
 #include <iostream>
 #include <string>
+#include <random>
+#include <chrono>
+#include <thread>
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
@@ -20,28 +22,50 @@ int main(int argc, char* argv[]) {
     
     Network network;
 
-    std::string key, value;
     std::cout << "==========================================" << std::endl;
-    std::cout << " 🖥️ CLIENTE RAFT CONECTADO" << std::endl;
+    std::cout << " 🖥️ CLIENTE RAFT AUTOMATIZADO CONECTADO" << std::endl;
     std::cout << " Alvo: " << leaderIp << ":" << leaderPort << std::endl;
     std::cout << "==========================================\n" << std::endl;
 
-    std::cout << "Digite a CHAVE para gravar no cluster: ";
-    std::cin >> key;
-    std::cout << "Digite o VALOR para a chave '" << key << "': ";
-    std::cin >> value;
-
-    // ID fictício para este cliente de teste
-    int clientId = 999; 
-    ClientCommand cmd(clientId, Operation::WRITE, key, value);
-
-    std::cout << "\nEnviando comando (WRITE, " << key << " = " << value << ") para o líder..." << std::endl;
+    // Configuração dos geradores de números aleatórios
+    std::random_device rd;
+    std::mt19937 gen(rd());
     
-    // Usa a sua própria estrutura de rede para despachar a mensagem!
-    sendClientCommandStruct sendCmd(leaderNode, cmd);
-    network.sendClientCommand(sendCmd);
+    // Distribuições solicitadas: 10 a 50 acessos; 1 a 5 segundos de espera
+    std::uniform_int_distribution<> reqDist(10, 50);
+    std::uniform_int_distribution<> timeDist(1, 5);
 
-    std::cout << "Comando enviado com sucesso!" << std::endl;
+    int numRequests = reqDist(gen);
+    int clientId = 999; // ID fictício para esta bateria de testes
+
+    std::cout << "Iniciando bateria automatizada de " << numRequests << " requisições de escrita...\n" << std::endl;
+
+    // Loop de envio de comandos aleatorizados
+    for (int i = 1; i <= numRequests; ++i) {
+        // Gera dados sintéticos formatados
+        std::string key = "chave_auto_" + std::to_string(i);
+        std::string value = "valor_auto_" + std::to_string(i);
+
+        ClientCommand cmd(clientId, Operation::WRITE, key, value);
+
+        std::cout << "[Req " << i << "/" << numRequests << "] Enviando: (WRITE, " 
+                  << key << " = " << value << ")...\n";
+        
+        // Empacota e envia a mensagem utilizando a assinatura original
+        sendClientCommandStruct sendCmd(leaderNode, cmd);
+        network.sendClientCommand(sendCmd);
+
+        // Aguarda um tempo aleatório (1 a 5 seg) antes da próxima requisição, exceto no último envio
+        if (i < numRequests) {
+            int delay = timeDist(gen);
+            std::cout << "    -> Aguardando " << delay << " segundos...\n";
+            std::this_thread::sleep_for(std::chrono::seconds(delay));
+        }
+    }
+
+    std::cout << "\n==========================================" << std::endl;
+    std::cout << " Bateria de testes finalizada com sucesso." << std::endl;
+    std::cout << "==========================================" << std::endl;
 
     return 0;
 }
