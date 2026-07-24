@@ -1,5 +1,6 @@
 #include "raft.h"
 #include <iostream>
+#include <iomanip>
 // raft.cpp
 
 // O seu construtor deve estar assim:
@@ -74,7 +75,7 @@ void raft::receiveElectionMessage(RequestVoteMessage msg, NodeInfo candidate)
         lastTerm = log.getEntries()[log.getEntries().size() - 1].getTerm();
 
     bool logOK = (msg.getcLogTerm() > lastTerm) || 
-                 (msg.getcLogTerm() == lastTerm && msg.getcLogLength() >= log.getEntries().size());
+                 (msg.getcLogTerm() == lastTerm && static_cast<size_t>(msg.getcLogLength()) >= log.getEntries().size());
 
     if (msg.getcTerm() == currentTerm && logOK && (votedFor == -1 || votedFor == msg.getcID()))
     {
@@ -109,10 +110,10 @@ void raft::collectVotes(int VoterID, int Term, bool granted)
         // Maioria para o total de nós do cluster
         int maioria = (cluster.size() + 1) / 2 + 1;
 
-        if (votesReceived.size() >= maioria) {
+        if (static_cast<int>(votesReceived.size()) >= maioria) {
             role = Role::LEADER;
-            std::cout << "\n👑 [Nó " << node.getid() << "] RECEBEU MAIORIA E SE TORNOU O LÍDER (Termo: " 
-                      << currentTerm << ")! 👑\n" << std::endl;
+            std::cout << "\n [Nó " << node.getid() << "] RECEBEU MAIORIA E SE TORNOU O LÍDER (Termo: " 
+                      << currentTerm << ")! \n" << std::endl;
                       
             sendHeartbeats(); 
         }
@@ -121,9 +122,11 @@ void raft::collectVotes(int VoterID, int Term, bool granted)
 
 void raft::broadcastClientMessage(ClientCommand msg)
 {
+    auto now = std::chrono::system_clock::now();
+    auto now_c = std::chrono::system_clock::to_time_t(now);
     if (role == Role::LEADER)
     {
-        std::cout << "\n📝 [Líder " << node.getid() << "] Recebeu comando do cliente: WRITE '" 
+        std::cout << std::put_time(std::localtime(&now_c), "%H:%M:%S") << "\n [Líder " << node.getid() << "] Recebeu comando do cliente: WRITE '" 
                   << msg.getKey() << "' = '" << msg.getValue() << "'" << std::endl;
                   
         log.append(LogEntry(msg, currentTerm));
@@ -136,7 +139,7 @@ void raft::broadcastClientMessage(ClientCommand msg)
     }
     else
     {
-        std::cout << "\n⚠️ [Nó " << node.getid() << "] Comando recebido, mas não sou o líder. Ignorando/Redirecionando..." << std::endl;
+        std::cout << "\n [Nó " << node.getid() << "] Comando recebido, mas não sou o líder. Ignorando/Redirecionando..." << std::endl;
         network.sendClientCommand(sendClientCommandStruct(currentLeader, msg));
     }
 }
@@ -150,14 +153,14 @@ void raft::replicateLog(NodeInfo follower){
     
     std::vector<LogEntry> entries;
     
-    if (prefixLength < originalLog.size()) {
+    if (prefixLength < static_cast<int>(originalLog.size())) {
         entries.assign(originalLog.begin() + prefixLength, originalLog.end());
     }
     
     Log suffix(entries);
     int prefixTerm = 0;
     
-    if (prefixLength > 0 && prefixLength <= originalLog.size()) {
+    if (prefixLength > 0 && prefixLength <= static_cast<int>(originalLog.size())) {
         prefixTerm = originalLog[prefixLength - 1].getTerm();
     }
     
@@ -196,8 +199,7 @@ void raft::followerReceiveAppendEntries(NodeInfo leader, int term, int prefixLen
         currentLeader = leader;
     }
 
-    bool logOK = (log.getEntries().size() >= prefixLen) && (prefixLen == 0 || log.getEntries()[prefixLen-1].getTerm() == prefixTerm);
-    
+    bool logOK = (log.getEntries().size() >= static_cast<size_t>(prefixLen)) && (prefixLen == 0 || log.getEntries()[prefixLen - 1].getTerm() == prefixTerm);    
     if (term == currentTerm && logOK){
         followerAppend(prefixLen, leaderCommit, suffix);
         int ack = prefixLen + suffix.size();
@@ -212,17 +214,17 @@ void raft::followerReceiveAppendEntries(NodeInfo leader, int term, int prefixLen
 }
 
 void raft::followerAppend(int prefixLen, int leaderCommit, std::vector<LogEntry> suffix){
-    if (suffix.size() > 0 && log.getEntries().size() > prefixLen){
+    if (!suffix.empty() && log.getEntries().size() > static_cast<size_t>(prefixLen)) {
         int index = log.getEntries().size() > prefixLen + suffix.size() ? prefixLen + suffix.size()-1 : log.getEntries().size()-1;
         if (log.getEntries()[index].getTerm() != suffix[index-prefixLen].getTerm())
             log.truncate(prefixLen);
     }
     
     if(prefixLen + suffix.size() > log.getEntries().size()){
-        for(int i = log.getEntries().size() - prefixLen; i < suffix.size(); i++) {
+        for (size_t i = log.getEntries().size() - prefixLen; i < suffix.size(); i++) {
             log.append(suffix[i]);
             
-            std::cout << "💾 [Nó " << node.getid() << "] Replicou nova entrada no Log: '" 
+            std::cout << " [Nó " << node.getid() << "] Replicou nova entrada no Log: '" 
                       << suffix[i].getOperation().getKey() << "' = '" 
                       << suffix[i].getOperation().getValue() << "'" << std::endl;
         }
@@ -238,7 +240,7 @@ void raft::logAcknowledgment(int followerID, int term, int ack, bool success){
         if(success && ack >=ackedLength[followerID]){
             sentLength[followerID] = ack;
             ackedLength[followerID] = ack;
-            //CommitLogEntries()
+            commitLog();
         }
         else if (sentLength[followerID] > 0){
             NodeInfo followerNode(-1, -1, "");
@@ -257,18 +259,21 @@ void raft::logAcknowledgment(int followerID, int term, int ack, bool success){
 }
 
 void raft::commitLog(){
-    while (commitLength < log.getEntries().size()){
-        int acks = 0;
-        for (auto it : cluster){
-            if (ackedLength[node.getid()] > commitLength)
-                acks++;
-        }
-        if (acks >=(cluster.size()+1)/2){
-            //deliver log to app
-            commitLength++;
-        }
-        else break;
+    while (static_cast<size_t>(commitLength) < log.getEntries().size()) {
+    int acks = 0;
+    for (auto it : cluster) {
+        if (ackedLength[it.getid()] > commitLength)
+            acks++;
     }
+    
+    if (acks >= static_cast<int>((cluster.size() + 1) / 2)) {
+        LogEntry committedEntry = log.getEntries()[commitLength];
+        applyLogToStateMachine(committedEntry);
+        commitLength++;
+    } else {
+        break;
+    }
+}
 }
 void raft::processMessage(std::unique_ptr<messageBase> msg)
 {
@@ -299,6 +304,8 @@ void raft::processMessage(std::unique_ptr<messageBase> msg)
             broadcastClientMessage(cmd->msg);
             break;
         }
+        case messageType::SEND_CLIENT_RESPONSE:
+            break;
 
         case messageType::SEND_APPEND_ENTRIES:
         {
@@ -449,5 +456,24 @@ void raft::sendHeartbeats() {
             emptySuffix
         );
         network.sendAppendEntries(hb);
+    }
+}
+void raft::applyLogToStateMachine(LogEntry entry) {
+    ClientCommand cmd = entry.getOperation();
+    
+    // 1. Aplica o comando no banco de dados local da máquina
+    // Exemplo: database[cmd.getKey()] = cmd.getValue();
+    std::cout << "[Nó " << node.getid() << "] Aplicou no banco: '" 
+              << cmd.getKey() << "' = '" << cmd.getValue() << "'" << std::endl;
+
+    // 2. Apenas o LÍDER responde ao cliente para não inundar o cliente com múltiplos "OKs"
+    if (role == Role::LEADER) {
+        ClientInfo client = cmd.getClient();
+        
+        // Dispara a mensagem via socket usando o seu método já existente em Network.cpp
+        network.sendClientResponse(sendClientResponseStruct(client, "OK - Processado com sucesso pelo Cluster"));
+        
+        std::cout << "[Líder " << node.getid() << "] Retorno 'OK' enviado com sucesso para o Cliente " 
+                  << client.id << " (" << client.ip << ":" << client.port << ")" << std::endl;
     }
 }

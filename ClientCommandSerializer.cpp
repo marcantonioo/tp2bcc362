@@ -1,6 +1,6 @@
 #include "ClientCommandSerializer.h"
-
 #include <cstring>
+#include <stdexcept>
 
 std::vector<char> ClientCommandSerializer::serialize(const ClientCommand& cmd)
 {
@@ -12,9 +12,19 @@ std::vector<char> ClientCommandSerializer::serialize(const ClientCommand& cmd)
         buffer.insert(buffer.end(), ptr, ptr + size);
     };
 
-    int clientID = cmd.getClientID();
+    // CORREÇÃO: Serializa os 3 campos essenciais de ClientInfo: ID, Porta e IP[cite: 9, 10]
+    int clientID = cmd.getClient().id;
     append(&clientID, sizeof(clientID));
 
+    int clientPort = cmd.getClient().port;
+    append(&clientPort, sizeof(clientPort));
+
+    std::string clientIp = cmd.getClient().ip;
+    int ipSize = clientIp.size();
+    append(&ipSize, sizeof(ipSize));
+    append(clientIp.data(), ipSize);
+
+    // Serializa o restante do comando original[cite: 10]
     int operation = static_cast<int>(cmd.getOperation());
     append(&operation, sizeof(operation));
 
@@ -35,12 +45,26 @@ ClientCommand ClientCommandSerializer::deserialize(const std::vector<char>& buff
 
     auto read = [&](void* dest, size_t size)
     {
+        if (offset + size > buffer.size()) {
+            throw std::runtime_error("Erro de desserialização: buffer menor que o esperado.");
+        }
         std::memcpy(dest, buffer.data() + offset, size);
         offset += size;
     };
 
+    // CORREÇÃO: Desserializa na exata mesma ordem: ID, Porta e IP[cite: 9, 10]
     int clientID;
     read(&clientID, sizeof(clientID));
+
+    int clientPort;
+    read(&clientPort, sizeof(clientPort));
+
+    int ipSize;
+    read(&ipSize, sizeof(ipSize));
+
+    std::string clientIp;
+    clientIp.resize(ipSize);
+    read(&clientIp[0], ipSize);
 
     int operation;
     read(&operation, sizeof(operation));
@@ -48,17 +72,22 @@ ClientCommand ClientCommandSerializer::deserialize(const std::vector<char>& buff
     int keySize;
     read(&keySize, sizeof(keySize));
 
-    std::string key(buffer.data() + offset, keySize);
-    offset += keySize;
+    std::string key;
+    key.resize(keySize);
+    read(&key[0], keySize);
 
     int valueSize;
     read(&valueSize, sizeof(valueSize));
 
-    std::string value(buffer.data() + offset, valueSize);
-    offset += valueSize;
+    std::string value;
+    value.resize(valueSize);
+    read(&value[0], valueSize);
+
+    // CORREÇÃO: Reconstrói o ClientInfo com os dados reais de IP e Porta que vieram da rede[cite: 10]
+    ClientInfo reconstructedClient(clientPort, clientIp, clientID);
 
     return ClientCommand(
-        clientID,
+        reconstructedClient,
         static_cast<Operation>(operation),
         key,
         value

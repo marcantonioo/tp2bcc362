@@ -72,6 +72,21 @@ std::unique_ptr<messageBase> Network::receiveMessage(int clientSock)
 
     switch (type)
     {
+        case messageType::SEND_CLIENT_RESPONSE:
+        {
+            int size;
+            if (!readAllBytes(clientSock, &size, sizeof(size))) return nullptr;
+            
+            std::vector<char> statusBuf(size + 1, 0); // +1 para null terminator
+            if (!readAllBytes(clientSock, statusBuf.data(), size)) return nullptr;
+            
+            // Retornamos um ClientInfo vazio pois o cliente que recebe a resposta 
+            // só se importa com a string de status.
+            return std::make_unique<sendClientResponseStruct>(
+                ClientInfo(0, "", 0), 
+                std::string(statusBuf.data())
+            );
+        }
         case messageType::SEND_REQUEST_VOTE:
         {
             int size;
@@ -227,6 +242,22 @@ void Network::sendRequestVote(sendRequestVoteStruct msg)
     int size = data.size();
     send(sock, &size, sizeof(size), 0);
     send(sock, data.data(), size, 0);
+
+    close(sock);
+}
+
+void Network::sendClientResponse(sendClientResponseStruct msg)
+{
+    int sock = createConnection(msg.targetClient.ip, msg.targetClient.port);
+    if (sock < 0) return;
+
+    messageType type = messageType::SEND_CLIENT_RESPONSE;
+    send(sock, &type, sizeof(type), 0);
+
+    // Envia o status (ex: "OK")
+    int statusSize = msg.status.size();
+    send(sock, &statusSize, sizeof(statusSize), 0);
+    send(sock, msg.status.c_str(), statusSize, 0);
 
     close(sock);
 }

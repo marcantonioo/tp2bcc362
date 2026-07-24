@@ -27,16 +27,16 @@ private:
     std::unordered_set<int> votesReceived;
     std::chrono::steady_clock::time_point lastHeartBeat;
     std::chrono::milliseconds timeout;
+    std::unordered_map<int, int> database;
 
     Log log;
     std::vector<NodeInfo> cluster;
     Network network;
     Role role;
 
-    // --- NOVOS ATRIBUTOS PRIVADOS ---
-    std::mutex stateMutex;         // Protege o estado interno do nó contra Data Races
-    bool running;                  // Controla a execução dos loops de background
-    std::thread listenerThread;    // Thread dedicada à escuta da rede
+    std::mutex stateMutex;        
+    bool running;                  
+    std::thread listenerThread;   
     std::thread tickerThread;      // Thread dedicada aos timeouts de eleição/heartbeats
     
     void tickerLoop();             // Loop do temporizador (Background)
@@ -69,6 +69,7 @@ public:
     // Método centralizador de processamento que criamos no passo anterior
     void processMessage(std::unique_ptr<messageBase> msg); 
     Network& getNetwork(){return network;}
+    void applyLogToStateMachine(LogEntry entry);
 };
 
 #endif

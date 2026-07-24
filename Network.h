@@ -11,7 +11,8 @@ enum struct messageType{
     SEND_VOTE_RESPONSE,
     SEND_CLIENT_COMMAND,
     SEND_APPEND_ENTRIES,
-    SEND_APPEND_ACK
+    SEND_APPEND_ACK,
+    SEND_CLIENT_RESPONSE
 };
 
 struct messageBase{
@@ -19,6 +20,14 @@ struct messageBase{
     messageBase(messageType t):msgtype(t){}
     // CRÍTICO: Destrutor virtual para evitar Memory Leak em ponteiros inteligentes
     virtual ~messageBase() = default; 
+};
+
+struct sendClientResponseStruct : messageBase {
+    ClientInfo targetClient;
+    std::string status; 
+
+    sendClientResponseStruct(ClientInfo target, std::string status)
+        : messageBase(messageType::SEND_CLIENT_RESPONSE), targetClient(target), status(status) {}
 };
 
 struct sendRequestVoteStruct : messageBase {
@@ -80,6 +89,7 @@ public:
     void sendClientCommand(sendClientCommandStruct msg);
     void sendAppendEntries(sendAppendEntriesStruct msg);
     void sendAppendAck(sendAppendAckStruct msg);
+    void sendClientResponse(sendClientResponseStruct msg); // ADICIONADO
     
     std::unique_ptr<messageBase> receiveMessage(int clientSock);
     void startListening(int port, std::function<void(std::unique_ptr<messageBase>)> messageHandler);
